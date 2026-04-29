@@ -1,0 +1,34 @@
+﻿@inherits LayoutComponentBase
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row px-4 d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">Entra ID Authentication & Authorization Demo</span>
+            <div>
+                <AuthorizeView>
+                    <Authorized>
+                        <span class="me-2">👤 @context.User.Identity?.Name</span>
+                        <a href="MicrosoftIdentity/Account/SignOut" class="btn btn-sm btn-outline-dark">Sign out</a>
+                    </Authorized>
+                    <NotAuthorized>
+                        <a href="MicrosoftIdentity/Account/SignIn" class="btn btn-sm btn-outline-primary">Sign in</a>
+                    </NotAuthorized>
+                </AuthorizeView>
+            </div>
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+<div id="blazor-error-ui">
+    An unhandled error has occurred.
+    <a href="" class="reload">Reload</a>
+    <a class="dismiss">🗙</a>
+</div>

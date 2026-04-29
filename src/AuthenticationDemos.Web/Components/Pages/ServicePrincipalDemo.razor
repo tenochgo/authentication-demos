@@ -1,0 +1,137 @@
+@page "/service-principal"
+@rendermode InteractiveServer
+
+@using Azure.Core
+@using Azure.Identity
+@using Azure.Storage.Blobs
+@using Microsoft.Extensions.Options
+@using AuthenticationDemos.Web.Models
+@using AuthenticationDemos.Web.Services
+@using AuthenticationDemos.Web.Components.Shared
+
+<PageTitle>Service Principal Demo</PageTitle>
+
+<h3>🔑 Demo 1: Service Principal (Client Credentials)</h3>
+<p class="text-muted">
+    This demo authenticates as the application using <code>ClientSecretCredential</code>.
+    Tokens are requested with the <code>.default</code> scope — no user interaction required.
+</p>
+
+<button class="btn btn-primary mb-3" @onclick="RunDemo" disabled="@_running">
+    @if (_running)
+    {
+        <span class="spinner-border spinner-border-sm me-1"></span>
+        <span>Running...</span>
+    }
+    else
+    {
+        <span>▶ Run Demo</span>
+    }
+</button>
+
+<div class="row">
+    <div class="col-md-6">
+        <StorageBrowser @ref="_storageBrowser" Explorer="@_storageExplorer" />
+    </div>
+    <div class="col-md-6">
+        <SqlBrowser @ref="_sqlBrowser" Explorer="@_sqlExplorer" />
+    </div>
+</div>
+
+<LogPanel Logger="@_logger" />
+
+@code {
+    [Inject] private IConfiguration Configuration { get; set; } = default!;
+    [Inject] private IOptions<AzureResourcesOptions> ResourceOptions { get; set; } = default!;
+    [Inject] private IDemoLogger _logger { get; set; } = default!;
+
+    private StorageBrowser? _storageBrowser;
+    private SqlBrowser? _sqlBrowser;
+    private IStorageExplorer? _storageExplorer;
+    private ISqlExplorer? _sqlExplorer;
+    private bool _running;
+
+    private async Task RunDemo()
+    {
+        _running = true;
+        StateHasChanged();
+
+        try
+        {
+            _logger.Clear();
+            var resources = ResourceOptions.Value;
+            var tenantId = Configuration["AzureAd:TenantId"]!;
+            var clientId = Configuration["AzureAd:ClientId"]!;
+            var clientSecret = Configuration["AzureAd:ClientSecret"]!;
+
+            _logger.Log(Services.LogLevel.Info, "=== Service Principal Demo Started ===");
+            _logger.Log(Services.LogLevel.Info, $"Tenant ID: {tenantId}");
+            _logger.Log(Services.LogLevel.Info, $"Client ID: {clientId}");
+            _logger.Log(Services.LogLevel.Info, "Client Secret: ****" + clientSecret[^4..]);
+
+            // Create credential
+            _logger.Log(Services.LogLevel.Info, "Creating ClientSecretCredential...");
+            var credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+
+            // --- Storage ---
+            _logger.Log(Services.LogLevel.Info, "");
+            _logger.Log(Services.LogLevel.Info, "--- Azure Storage ---");
+            _logger.Log(Services.LogLevel.Info, $"Storage Account: {resources.StorageAccountName}");
+            _logger.Log(Services.LogLevel.Info, "Acquiring token for https://storage.azure.com/.default ...");
+
+            try
+            {
+                var storageTokenRequest = new TokenRequestContext(new[] { "https://storage.azure.com/.default" });
+                var storageToken = await credential.GetTokenAsync(storageTokenRequest);
+                TokenHelper.LogTokenClaims(_logger, storageToken.Token, "Storage Token");
+
+                var blobServiceClient = new BlobServiceClient(
+                    new Uri($"https://{resources.StorageAccountName}.blob.core.windows.net"),
+                    credential);
+
+                _storageExplorer = new StorageExplorer(blobServiceClient, _logger);
+                StateHasChanged();
+                await _storageBrowser!.LoadAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.Log(Services.LogLevel.Error, $"Storage error: {ex.Message}");
+            }
+
+            // --- SQL ---
+            _logger.Log(Services.LogLevel.Info, "");
+            _logger.Log(Services.LogLevel.Info, "--- Azure SQL Database ---");
+            _logger.Log(Services.LogLevel.Info, $"SQL Server: {resources.SqlServer}");
+            _logger.Log(Services.LogLevel.Info, $"Database: {resources.SqlDatabase}");
+            _logger.Log(Services.LogLevel.Info, "Acquiring token for https://database.windows.net/.default ...");
+
+            try
+            {
+                var sqlTokenRequest = new TokenRequestContext(new[] { "https://database.windows.net/.default" });
+                var sqlToken = await credential.GetTokenAsync(sqlTokenRequest);
+                TokenHelper.LogTokenClaims(_logger, sqlToken.Token, "SQL Token");
+
+                var connectionString = $"Server={resources.SqlServer};Database={resources.SqlDatabase};";
+                _sqlExplorer = new SqlExplorer(connectionString, sqlToken.Token, _logger);
+                StateHasChanged();
+                await _sqlBrowser!.LoadAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.Log(Services.LogLevel.Error, $"SQL error: {ex.Message}");
+            }
+
+            _logger.Log(Services.LogLevel.Info, "");
+            _logger.Log(Services.LogLevel.Info, "=== Service Principal Demo Complete ===");
+        }
+        catch (Exception ex)
+        {
+            _logger.Log(Services.LogLevel.Error, $"Unexpected error: {ex.Message}");
+        }
+        finally
+        {
+            _running = false;
+            StateHasChanged();
+        }
+    }
+}

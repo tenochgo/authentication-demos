@@ -1,0 +1,181 @@
+@page "/on-behalf-of"
+@rendermode InteractiveServer
+
+@using Azure.Core
+@using Azure.Storage.Blobs
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Options
+@using Microsoft.Identity.Web
+@using AuthenticationDemos.Web.Models
+@using AuthenticationDemos.Web.Services
+@using AuthenticationDemos.Web.Components.Shared
+@using System.Security.Claims
+
+@attribute [Authorize]
+
+<PageTitle>On Behalf Of Demo</PageTitle>
+
+<h3>👤 Demo 2: On Behalf Of (Delegated)</h3>
+<p class="text-muted">
+    This demo uses the signed-in user's identity. The app acquires delegated tokens via the
+    <strong>On-Behalf-Of</strong> flow to access Azure resources as the user.
+</p>
+
+<AuthorizeView>
+    <Authorized>
+        <div class="alert alert-success py-2">
+            ✅ Signed in as: <strong>@context.User.Identity?.Name</strong>
+        </div>
+
+        <button class="btn btn-primary mb-3" @onclick="RunDemo" disabled="@_running">
+            @if (_running)
+            {
+                <span class="spinner-border spinner-border-sm me-1"></span>
+                <span>Running...</span>
+            }
+            else
+            {
+                <span>▶ Run Demo</span>
+            }
+        </button>
+
+        <div class="row">
+            <div class="col-md-6">
+                <StorageBrowser @ref="_storageBrowser" Explorer="@_storageExplorer" />
+            </div>
+            <div class="col-md-6">
+                <SqlBrowser @ref="_sqlBrowser" Explorer="@_sqlExplorer" />
+            </div>
+        </div>
+
+        <LogPanel Logger="@_logger" />
+    </Authorized>
+    <NotAuthorized>
+        <div class="alert alert-warning">
+            Please <a href="MicrosoftIdentity/Account/SignIn">sign in</a> to run this demo.
+        </div>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    [Inject] private IConfiguration Configuration { get; set; } = default!;
+    [Inject] private IOptions<AzureResourcesOptions> ResourceOptions { get; set; } = default!;
+    [Inject] private IDemoLogger _logger { get; set; } = default!;
+    [Inject] private ITokenAcquisition TokenAcquisition { get; set; } = default!;
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    private StorageBrowser? _storageBrowser;
+    private SqlBrowser? _sqlBrowser;
+    private IStorageExplorer? _storageExplorer;
+    private ISqlExplorer? _sqlExplorer;
+    private bool _running;
+
+    private async Task RunDemo()
+    {
+        _running = true;
+        StateHasChanged();
+
+        try
+        {
+            _logger.Clear();
+            var resources = ResourceOptions.Value;
+            var storageScopes = Configuration.GetSection("DownstreamApis:Storage:Scopes").Get<string[]>()
+                ?? new[] { "https://storage.azure.com/user_impersonation" };
+            var sqlScopes = Configuration.GetSection("DownstreamApis:Sql:Scopes").Get<string[]>()
+                ?? new[] { "https://database.windows.net/user_impersonation" };
+
+            _logger.Log(Services.LogLevel.Info, "=== On Behalf Of Demo Started ===");
+
+            // Log user claims
+            var authState = await AuthStateTask!;
+            var user = authState.User;
+
+            _logger.Log(Services.LogLevel.Info, "User signed in via OpenID Connect");
+            _logger.Log(Services.LogLevel.Token, "--- ID Token Claims ---");
+            foreach (var claim in user.Claims)
+            {
+                _logger.Log(Services.LogLevel.Claim, $"  {claim.Type}: {claim.Value}");
+            }
+
+            // --- Storage (OBO) ---
+            _logger.Log(Services.LogLevel.Info, "");
+            _logger.Log(Services.LogLevel.Info, "--- Azure Storage (On Behalf Of) ---");
+            _logger.Log(Services.LogLevel.Info, $"Requesting OBO token for scopes: {string.Join(", ", storageScopes)}");
+
+            try
+            {
+                var storageToken = await TokenAcquisition.GetAccessTokenForUserAsync(storageScopes);
+                TokenHelper.LogTokenClaims(_logger, storageToken, "Storage OBO Token");
+
+                var blobServiceClient = new BlobServiceClient(
+                    new Uri($"https://{resources.StorageAccountName}.blob.core.windows.net"),
+                    new OboTokenCredential(storageToken));
+
+                _storageExplorer = new StorageExplorer(blobServiceClient, _logger);
+                StateHasChanged();
+                await _storageBrowser!.LoadAsync();
+            }
+            catch (MicrosoftIdentityWebChallengeUserException)
+            {
+                _logger.Log(Services.LogLevel.Warning, "User interaction required — consent or MFA needed. Please sign out and sign in again.");
+            }
+            catch (Exception ex)
+            {
+                _logger.Log(Services.LogLevel.Error, $"Storage OBO error: {ex.Message}");
+            }
+
+            // --- SQL (OBO) ---
+            _logger.Log(Services.LogLevel.Info, "");
+            _logger.Log(Services.LogLevel.Info, "--- Azure SQL Database (On Behalf Of) ---");
+            _logger.Log(Services.LogLevel.Info, $"Requesting OBO token for scopes: {string.Join(", ", sqlScopes)}");
+
+            try
+            {
+                var sqlToken = await TokenAcquisition.GetAccessTokenForUserAsync(sqlScopes);
+                TokenHelper.LogTokenClaims(_logger, sqlToken, "SQL OBO Token");
+
+                var connectionString = $"Server={resources.SqlServer};Database={resources.SqlDatabase};";
+                _sqlExplorer = new SqlExplorer(connectionString, sqlToken, _logger);
+                StateHasChanged();
+                await _sqlBrowser!.LoadAsync();
+            }
+            catch (MicrosoftIdentityWebChallengeUserException)
+            {
+                _logger.Log(Services.LogLevel.Warning, "User interaction required — consent or MFA needed. Please sign out and sign in again.");
+            }
+            catch (Exception ex)
+            {
+                _logger.Log(Services.LogLevel.Error, $"SQL OBO error: {ex.Message}");
+            }
+
+            _logger.Log(Services.LogLevel.Info, "");
+            _logger.Log(Services.LogLevel.Info, "=== On Behalf Of Demo Complete ===");
+        }
+        catch (Exception ex)
+        {
+            _logger.Log(Services.LogLevel.Error, $"Unexpected error: {ex.Message}");
+        }
+        finally
+        {
+            _running = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Simple TokenCredential wrapper that uses a pre-acquired OBO token string.
+    /// </summary>
+    private class OboTokenCredential : TokenCredential
+    {
+        private readonly string _token;
+
+        public OboTokenCredential(string token) => _token = token;
+
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => new AccessToken(_token, DateTimeOffset.UtcNow.AddHours(1));
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => new ValueTask<AccessToken>(new AccessToken(_token, DateTimeOffset.UtcNow.AddHours(1)));
+    }
+}

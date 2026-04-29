@@ -1,0 +1,64 @@
+@using AuthenticationDemos.Web.Services
+
+<div class="log-panel">
+    <div class="log-header">
+        <span class="log-title">📋 Activity Log</span>
+        <button class="btn btn-sm btn-outline-light" @onclick="Clear">Clear</button>
+    </div>
+    <div class="log-body" @ref="_logContainer" id="log-container">
+        @foreach (var entry in _entries)
+        {
+            <div class="log-entry log-@entry.Level.ToString().ToLower()">
+                <span class="log-time">@entry.Timestamp.ToString("HH:mm:ss.fff")</span>
+                <span class="log-level">[@entry.Level]</span>
+                <span class="log-msg">@entry.Message</span>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public IDemoLogger? Logger { get; set; }
+
+    private List<LogEntry> _entries = new();
+    private ElementReference _logContainer;
+
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        if (Logger is not null)
+        {
+            _entries = Logger.Entries.ToList();
+            Logger.OnLogEntry += OnNewEntry;
+        }
+    }
+
+    private void OnNewEntry(LogEntry entry)
+    {
+        InvokeAsync(async () =>
+        {
+            _entries.Add(entry);
+            StateHasChanged();
+            try
+            {
+                await JS.InvokeVoidAsync("scrollToBottom", "log-container");
+            }
+            catch { /* ignore during prerender */ }
+        });
+    }
+
+    private void Clear()
+    {
+        Logger?.Clear();
+        _entries.Clear();
+    }
+
+    public void Dispose()
+    {
+        if (Logger is not null)
+        {
+            Logger.OnLogEntry -= OnNewEntry;
+        }
+    }
+}

@@ -1,0 +1,79 @@
+﻿@page "/"
+
+<PageTitle>Entra ID Auth Demos</PageTitle>
+
+<h2>🔐 Entra ID Authentication & Authorization Demos</h2>
+
+<p class="lead">
+    This application demonstrates two authentication patterns using Microsoft Entra ID
+    to access Azure Storage and Azure SQL Database.
+</p>
+
+<div class="row mt-4">
+    <div class="col-md-6 mb-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">🔑 Demo 1: Service Principal</h5>
+                <p class="card-text">
+                    Uses the <strong>Client Credentials</strong> flow (OAuth 2.0 <code>client_credentials</code> grant).
+                    The application authenticates as itself using its Client ID and Client Secret — no user sign-in is required.
+                </p>
+                <h6>How it works:</h6>
+                <ol class="small">
+                    <li>App sends Client ID + Secret to Entra ID</li>
+                    <li>Entra ID validates and returns an <strong>app-only access token</strong></li>
+                    <li>App uses the token to access Storage and SQL as the service principal</li>
+                </ol>
+                <a href="service-principal" class="btn btn-primary">Run Demo →</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 mb-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">👤 Demo 2: On Behalf Of</h5>
+                <p class="card-text">
+                    Uses the <strong>Authorization Code + On-Behalf-Of</strong> flow.
+                    The user signs in, and the app exchanges the user's token for a delegated token
+                    to access resources <em>on behalf of</em> the signed-in user.
+                </p>
+                <h6>How it works:</h6>
+                <ol class="small">
+                    <li>User signs in via OpenID Connect (browser redirect)</li>
+                    <li>App receives an ID token with user claims</li>
+                    <li>App calls <code>ITokenAcquisition</code> to get <strong>OBO delegated tokens</strong> for Storage and SQL</li>
+                    <li>Resources are accessed with the <em>user's identity</em>, not the app's</li>
+                </ol>
+                <a href="on-behalf-of" class="btn btn-primary">Run Demo →</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-4 border-warning">
+    <div class="card-header bg-warning text-dark fw-bold">⚠️ Azure Prerequisites</div>
+    <div class="card-body">
+        <p class="mb-2">Before running the demos, ensure:</p>
+        <ol class="mb-0">
+            <li>
+                <strong>Entra ID App Registration</strong> — Create with a client secret.
+                For OBO: expose an API scope, add delegated permissions for Storage and SQL,
+                and set the redirect URI to <code>https://localhost:&lt;port&gt;/signin-oidc</code>.
+            </li>
+            <li>
+                <strong>Azure Storage Account</strong> — Assign <code>Storage Blob Data Reader</code>
+                role to the service principal (Demo 1) and to the demo user (Demo 2).
+            </li>
+            <li>
+                <strong>Azure SQL Database</strong> — Add the service principal as an external user with
+                <code>db_datareader</code> role (Demo 1). Add the demo user likewise (Demo 2).
+                Enable Entra ID authentication on the SQL server.
+            </li>
+            <li>
+                <strong>Configuration</strong> — Update <code>appsettings.json</code> with your
+                Tenant ID, Client ID, Client Secret, Storage Account name, SQL Server, and Database name.
+            </li>
+        </ol>
+    </div>
+</div>

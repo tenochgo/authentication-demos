@@ -1,0 +1,136 @@
+@using AuthenticationDemos.Web.Models
+@using AuthenticationDemos.Web.Services
+
+<div class="browser-panel">
+    <h5>🗄️ Azure SQL Browser</h5>
+
+    @if (_loading)
+    {
+        <div class="text-muted"><em>Loading...</em></div>
+    }
+    else if (_error != null)
+    {
+        <div class="alert alert-danger">@_error</div>
+    }
+    else if (Explorer is null)
+    {
+        <div class="text-muted"><em>Not initialized. Run the demo to connect.</em></div>
+    }
+    else
+    {
+        <div class="row mb-2 g-2">
+            <div class="col-md-8">
+                <label class="form-label fw-bold">Table:</label>
+                <select class="form-select form-select-sm" @bind="_selectedTableIndex">
+                    <option value="-1">— Select a table —</option>
+                    @for (int i = 0; i < _tables.Count; i++)
+                    {
+                        <option value="@i">@_tables[i].FullName</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-bold">Top N:</label>
+                <input type="number" class="form-control form-control-sm" min="1" max="100"
+                       @bind="_topN" />
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button class="btn btn-sm btn-primary w-100" @onclick="RunQuery"
+                        disabled="@(_selectedTableIndex < 0)">
+                    ▶ Query
+                </button>
+            </div>
+        </div>
+
+        @if (_result != null && _result.Columns.Any())
+        {
+            <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                <table class="table table-sm table-striped table-hover mb-0">
+                    <thead class="table-dark">
+                        <tr>
+                            @foreach (var col in _result.Columns)
+                            {
+                                <th>@col</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _result.Rows)
+                        {
+                            <tr>
+                                @foreach (var col in _result.Columns)
+                                {
+                                    <td>@(row.GetValueOrDefault(col)?.ToString() ?? "<NULL>")</td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else if (_result != null)
+        {
+            <div class="text-muted"><em>Query returned no results.</em></div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public ISqlExplorer? Explorer { get; set; }
+
+    private List<SqlTableInfo> _tables = new();
+    private int _selectedTableIndex = -1;
+    private int _topN = 10;
+    private SqlQueryResult? _result;
+    private bool _loading;
+    private string? _error;
+
+    public async Task LoadAsync()
+    {
+        if (Explorer is null) return;
+
+        _loading = true;
+        _error = null;
+        _result = null;
+        _selectedTableIndex = -1;
+        StateHasChanged();
+
+        try
+        {
+            _tables = await Explorer.ListTablesAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RunQuery()
+    {
+        if (Explorer is null || _selectedTableIndex < 0 || _selectedTableIndex >= _tables.Count)
+            return;
+
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            _result = await Explorer.ExecuteQueryAsync(_tables[_selectedTableIndex], _topN);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+}

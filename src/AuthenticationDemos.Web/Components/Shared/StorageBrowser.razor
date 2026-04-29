@@ -1,0 +1,194 @@
+@using AuthenticationDemos.Web.Models
+@using AuthenticationDemos.Web.Services
+
+<div class="browser-panel">
+    <h5>🗂️ Azure Storage Browser</h5>
+
+    @if (_loading)
+    {
+        <div class="text-muted"><em>Loading...</em></div>
+    }
+    else if (_error != null)
+    {
+        <div class="alert alert-danger">@_error</div>
+    }
+    else if (Explorer is null)
+    {
+        <div class="text-muted"><em>Not initialized. Run the demo to connect.</em></div>
+    }
+    else
+    {
+        <div class="mb-2">
+            <label class="form-label fw-bold">Container:</label>
+            <select class="form-select form-select-sm" @onchange="OnContainerChanged">
+                <option value="">— Select a container —</option>
+                @foreach (var c in _containers)
+                {
+                    <option value="@c" selected="@(c == _selectedContainer)">@c</option>
+                }
+            </select>
+        </div>
+
+        @if (_selectedContainer != null)
+        {
+            <!-- Breadcrumb -->
+            <nav aria-label="breadcrumb" class="mb-2">
+                <ol class="breadcrumb mb-0">
+                    <li class="breadcrumb-item">
+                        <a href="javascript:void(0)" @onclick="() => NavigateTo(null)"
+                           @onclick:preventDefault>🏠 Root</a>
+                    </li>
+                    @foreach (var crumb in GetBreadcrumbs())
+                    {
+                        <li class="breadcrumb-item">
+                            <a href="javascript:void(0)" @onclick="() => NavigateTo(crumb.Prefix)"
+                               @onclick:preventDefault>@crumb.Name</a>
+                        </li>
+                    }
+                </ol>
+            </nav>
+
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Size</th>
+                            <th>Last Modified</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (!_items.Any())
+                        {
+                            <tr><td colspan="3" class="text-muted text-center"><em>No items</em></td></tr>
+                        }
+                        @foreach (var item in _items)
+                        {
+                            <tr>
+                                <td>
+                                    @if (item.IsFolder)
+                                    {
+                                        <a href="javascript:void(0)" @onclick="() => NavigateTo(item.Name)"
+                                           @onclick:preventDefault>
+                                            📁 @GetDisplayName(item.Name)
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <span>📄 @GetDisplayName(item.Name)</span>
+                                    }
+                                </td>
+                                <td>@(item.IsFolder ? "—" : FormatSize(item.Size))</td>
+                                <td>@(item.LastModified?.ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public IStorageExplorer? Explorer { get; set; }
+
+    private List<string> _containers = new();
+    private string? _selectedContainer;
+    private string? _currentPrefix;
+    private List<BlobItemModel> _items = new();
+    private bool _loading;
+    private string? _error;
+
+    public async Task LoadAsync()
+    {
+        if (Explorer is null) return;
+
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            _containers = await Explorer.ListContainersAsync();
+            _selectedContainer = null;
+            _currentPrefix = null;
+            _items.Clear();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnContainerChanged(ChangeEventArgs e)
+    {
+        _selectedContainer = e.Value?.ToString();
+        _currentPrefix = null;
+        if (!string.IsNullOrEmpty(_selectedContainer))
+        {
+            await LoadBlobs();
+        }
+    }
+
+    private async Task NavigateTo(string? prefix)
+    {
+        _currentPrefix = prefix;
+        await LoadBlobs();
+    }
+
+    private async Task LoadBlobs()
+    {
+        if (Explorer is null || _selectedContainer is null) return;
+
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            _items = await Explorer.ListBlobsAsync(_selectedContainer, _currentPrefix);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private string GetDisplayName(string fullName)
+    {
+        var name = fullName.TrimEnd('/');
+        var lastSlash = name.LastIndexOf('/');
+        return lastSlash >= 0 ? name[(lastSlash + 1)..] : name;
+    }
+
+    private string FormatSize(long? bytes)
+    {
+        if (bytes is null) return "—";
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024.0):F1} MB";
+    }
+
+    private List<(string Name, string Prefix)> GetBreadcrumbs()
+    {
+        if (string.IsNullOrEmpty(_currentPrefix)) return new();
+
+        var parts = _currentPrefix.TrimEnd('/').Split('/');
+        var crumbs = new List<(string Name, string Prefix)>();
+        for (int i = 0; i < parts.Length; i++)
+        {
+            var prefix = string.Join("/", parts.Take(i + 1)) + "/";
+            crumbs.Add((parts[i], prefix));
+        }
+        return crumbs;
+    }
+}
