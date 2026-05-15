@@ -18,6 +18,8 @@ builder.Services.AddMicrosoftIdentityWebAppAuthentication(builder.Configuration)
 builder.Services.AddControllersWithViews()
     .AddMicrosoftIdentityUI();
 
+builder.Services.AddMicrosoftIdentityConsentHandler();
+
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
 

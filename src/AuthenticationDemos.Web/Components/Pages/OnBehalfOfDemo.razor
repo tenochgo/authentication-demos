@@ -62,6 +62,7 @@
     [Inject] private IOptions<AzureResourcesOptions> ResourceOptions { get; set; } = default!;
     [Inject] private IDemoLogger _logger { get; set; } = default!;
     [Inject] private ITokenAcquisition TokenAcquisition { get; set; } = default!;
+    [Inject] private MicrosoftIdentityConsentAndConditionalAccessHandler ConsentHandler { get; set; } = default!;
 
     [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
 
@@ -116,9 +117,11 @@
                 StateHasChanged();
                 await _storageBrowser!.LoadAsync();
             }
-            catch (MicrosoftIdentityWebChallengeUserException)
+            catch (MicrosoftIdentityWebChallengeUserException ex)
             {
-                _logger.Log(Services.LogLevel.Warning, "User interaction required — consent or MFA needed. Please sign out and sign in again.");
+                _logger.Log(Services.LogLevel.Warning, "User interaction required for storage access. Redirecting for consent/conditional-access challenge.");
+                ConsentHandler.HandleException(ex);
+                return;
             }
             catch (Exception ex)
             {
@@ -140,9 +143,11 @@
                 StateHasChanged();
                 await _sqlBrowser!.LoadAsync();
             }
-            catch (MicrosoftIdentityWebChallengeUserException)
+            catch (MicrosoftIdentityWebChallengeUserException ex)
             {
-                _logger.Log(Services.LogLevel.Warning, "User interaction required — consent or MFA needed. Please sign out and sign in again.");
+                _logger.Log(Services.LogLevel.Warning, "User interaction required for SQL access. Redirecting for consent/conditional-access challenge.");
+                ConsentHandler.HandleException(ex);
+                return;
             }
             catch (Exception ex)
             {
