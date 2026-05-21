@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Home - Entra ID Auth Demos{% endblock %}
+{% block page_id %}home{% endblock %}
+{% block content %}
+<h2>🔐 Entra ID Authentication & Authorization Demos</h2>
+<p class="lead">This application demonstrates service principal and on-behalf-of access to Azure Storage and Azure SQL Database.</p>
+
+<div class="row mt-4">
+  <div class="col-md-6 mb-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title">🔑 Demo 1: Service Principal</h5>
+        <p class="card-text">Uses client credentials. The app authenticates as itself with Client ID + Client Secret.</p>
+        <a href="/service-principal" class="btn btn-primary">Run Demo →</a>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 mb-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title">👤 Demo 2: On Behalf Of</h5>
+        <p class="card-text">Uses user sign-in + OBO token exchange to access resources with the signed-in user's identity.</p>
+        <a href="/on-behalf-of" class="btn btn-primary">Run Demo →</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

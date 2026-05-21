@@ -1,0 +1,15 @@
+body { background: #f8f9fa; }
+.sidebar { width: 240px; min-height: 100vh; }
+.browser-panel { border: 1px solid #d6d6d6; border-radius: 8px; padding: 12px; background: #fff; min-height: 360px; }
+.log-panel { border: 1px solid #111; border-radius: 8px; overflow: hidden; }
+.log-header { background: #1f2937; color: #fff; display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; }
+.log-body { background: #0f172a; color: #f8fafc; min-height: 220px; max-height: 320px; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; padding: 8px; }
+.log-entry { padding: 2px 0; white-space: pre-wrap; }
+.log-time { color: #94a3b8; margin-right: 8px; }
+.log-level { margin-right: 8px; font-weight: 600; }
+.log-info { color: #93c5fd; }
+.log-warning { color: #fde68a; }
+.log-error { color: #fca5a5; }
+.log-token { color: #86efac; }
+.log-claim { color: #d8b4fe; }
+.breadcrumb a { text-decoration: none; }

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Service Principal Demo{% endblock %}
+{% block page_id %}service_principal{% endblock %}
+{% block content %}
+<h3>🔑 Demo 1: Service Principal (Client Credentials)</h3>
+<p class="text-muted">This demo authenticates as the application using ClientSecretCredential and .default scopes.</p>
+
+<button id="run-demo" class="btn btn-primary mb-3">▶ Run Demo</button>
+
+<div class="row">
+  <div class="col-md-6">
+    <div class="browser-panel">
+      <h5>🗂️ Azure Storage Browser</h5>
+      <div class="mb-2">
+        <label class="form-label fw-bold">Container:</label>
+        <select id="container-select" class="form-select form-select-sm">
+          <option value="">— Select a container —</option>
+        </select>
+      </div>
+      <nav class="mb-2"><ol id="breadcrumb" class="breadcrumb mb-0"></ol></nav>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+          <thead><tr><th>Name</th><th>Size</th><th>Last Modified</th></tr></thead>
+          <tbody id="storage-items"><tr><td colspan="3" class="text-muted text-center"><em>Not initialized. Run the demo to connect.</em></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="browser-panel">
+      <h5>🗄️ Azure SQL Browser</h5>
+      <div class="row mb-2 g-2">
+        <div class="col-md-8">
+          <label class="form-label fw-bold">Table:</label>
+          <select id="table-select" class="form-select form-select-sm"><option value="">— Select a table —</option></select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label fw-bold">Top N:</label>
+          <input id="top-n" type="number" class="form-control form-control-sm" min="1" max="100" value="10" />
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+          <button id="query-btn" class="btn btn-sm btn-primary w-100" disabled>▶ Query</button>
+        </div>
+      </div>
+      <div id="sql-results" class="table-responsive"></div>
+    </div>
+  </div>
+</div>
+
+<div class="log-panel mt-3">
+  <div class="log-header"><span class="log-title">📋 Activity Log</span><button id="clear-logs" class="btn btn-sm btn-outline-light">Clear</button></div>
+  <div id="log-body" class="log-body"></div>
+</div>
+{% endblock %}
