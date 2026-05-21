@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 import struct
 import time
 import uuid
@@ -20,7 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "appsettings.json"
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
 _state_lock = Lock()
 _state: dict[str, dict[str, Any]] = {}
@@ -175,22 +176,23 @@ def run_select_query(mode: str, schema: str, table: str, top_n: int) -> dict[str
     top_n = max(1, min(int(top_n), 100))
     state = get_session_state()
     allowed = state["allowed_tables"][mode]
-    if not any(t["schema"] == schema and t["tableName"] == table for t in allowed):
+    matched = next((t for t in allowed if t["schema"] == schema and t["tableName"] == table), None)
+    if not matched:
         append_log(mode, "error", f"Table '{schema}.{table}' is not in the allowed list. Aborting query.")
         return {"columns": [], "rows": []}
 
     token = get_sql_token_for_mode(mode)
-    safe_schema = _escape_identifier(schema)
-    safe_table = _escape_identifier(table)
-    sql = f"SELECT TOP {top_n} * FROM {safe_schema}.{safe_table}"
+    safe_schema = _escape_identifier(matched["schema"])
+    safe_table = _escape_identifier(matched["tableName"])
+    sql = f"SELECT * FROM {safe_schema}.{safe_table} ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY"
 
     with _sql_connect(token) as conn:
         cursor = conn.cursor()
-        cursor.execute(sql)
+        cursor.execute(sql, top_n)
         columns = [col[0] for col in cursor.description]
         rows = []
         for db_row in cursor.fetchall():
-            row = {columns[i]: db_row[i] for i in range(len(columns))}
+            row = {column: value for column, value in zip(columns, db_row)}
             rows.append(row)
 
     append_log(mode, "info", f"Query returned {len(rows)} row(s) with {len(columns)} column(s)")
@@ -219,6 +221,11 @@ def acquire_obo_token(target: str) -> str:
         msg = result.get("error_description") or result.get("error") or "Unknown OBO failure"
         raise RuntimeError(msg)
     return result["access_token"]
+
+
+def error_response(mode: str, message: str, status: int = 500, log_details: str | None = None) -> Any:
+    append_log(mode, "error", log_details or message)
+    return jsonify({"ok": False, "error": message}), status
 
 
 @app.get("/")
@@ -317,8 +324,7 @@ def run_service_principal() -> Any:
         append_log(mode, "info", "=== Service Principal Demo Complete ===")
         return jsonify({"ok": True})
     except Exception as ex:  # noqa: BLE001
-        append_log(mode, "error", f"Unexpected error: {ex}")
-        return jsonify({"ok": False, "error": str(ex)}), 500
+        return error_response(mode, "Unexpected error while running service principal demo.", 500, f"Unexpected error: {ex}")
 
 
 @app.post("/api/on-behalf-of/run")
@@ -358,9 +364,8 @@ def run_obo() -> Any:
         message = str(ex)
         if "interaction_required" in message or "consent" in message.lower():
             append_log(mode, "warning", "User interaction required for delegated access.")
-            return jsonify({"ok": False, "error": message}), 403
-        append_log(mode, "error", f"Unexpected error: {message}")
-        return jsonify({"ok": False, "error": message}), 500
+            return jsonify({"ok": False, "error": "User interaction required for delegated access."}), 403
+        return error_response(mode, "Unexpected error while running OBO demo.", 500, f"Unexpected error: {message}")
 
 
 @app.get("/api/logs")
@@ -394,8 +399,7 @@ def list_containers(mode: str) -> Any:
         append_log(mode, "info", f"Found {len(containers)} container(s): {', '.join(containers)}")
         return jsonify(containers)
     except Exception as ex:  # noqa: BLE001
-        append_log(mode, "error", f"Error listing containers: {ex}")
-        return jsonify({"error": str(ex)}), 500
+        return error_response(mode, "Error listing containers.", 500, f"Error listing containers: {ex}")
 
 
 @app.get("/api/<mode>/storage/blobs")
@@ -431,8 +435,7 @@ def list_blobs(mode: str) -> Any:
         append_log(mode, "info", f"Found {len(items)} item(s)" + (f" under '{prefix}'" if prefix else " at root"))
         return jsonify(items)
     except Exception as ex:  # noqa: BLE001
-        append_log(mode, "error", f"Error listing blobs: {ex}")
-        return jsonify({"error": str(ex)}), 500
+        return error_response(mode, "Error listing blobs.", 500, f"Error listing blobs: {ex}")
 
 
 @app.get("/api/<mode>/sql/tables")
@@ -448,8 +451,7 @@ def list_tables(mode: str) -> Any:
         append_log(mode, "info", f"Found {len(tables)} table(s): {', '.join(t['fullName'] for t in tables)}")
         return jsonify(tables)
     except Exception as ex:  # noqa: BLE001
-        append_log(mode, "error", f"Error listing tables: {ex}")
-        return jsonify({"error": str(ex)}), 500
+        return error_response(mode, "Error listing tables.", 500, f"Error listing tables: {ex}")
 
 
 @app.post("/api/<mode>/sql/query")
@@ -468,13 +470,12 @@ def query_table(mode: str) -> Any:
         return jsonify({"error": "schema and tableName are required"}), 400
 
     try:
-        append_log(mode, "info", f"Executing: SELECT TOP {max(1, min(int(top_n), 100))} * FROM [{schema}].[{table}]")
+        append_log(mode, "info", f"Executing: SELECT * FROM [{schema}].[{table}] ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT {max(1, min(int(top_n), 100))} ROWS ONLY")
         result = run_select_query(mode, schema, table, int(top_n))
         return jsonify(result)
     except Exception as ex:  # noqa: BLE001
-        append_log(mode, "error", f"Error executing query: {ex}")
-        return jsonify({"error": str(ex)}), 500
+        return error_response(mode, "Error executing query.", 500, f"Error executing query: {ex}")
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(host="127.0.0.1", port=5000, debug=False)
