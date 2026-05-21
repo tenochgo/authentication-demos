@@ -1,0 +1,30 @@
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*",
+  "AzureAd": {
+    "Instance": "https://login.microsoftonline.com/",
+    "TenantId": "<tenant-id>",
+    "ClientId": "<client-id>",
+    "ClientSecret": "<client-secret>",
+    "CallbackPath": "/signin-oidc",
+    "SignedOutCallbackPath": "/signout-callback-oidc"
+  },
+  "DownstreamApis": {
+    "Storage": {
+      "Scopes": ["https://storage.azure.com/user_impersonation"]
+    },
+    "Sql": {
+      "Scopes": ["https://database.windows.net/user_impersonation"]
+    }
+  },
+  "AzureResources": {
+    "StorageAccountName": "<storage-account-name>",
+    "SqlServer": "<server>.database.windows.net",
+    "SqlDatabase": "<database-name>"
+  }
+}
