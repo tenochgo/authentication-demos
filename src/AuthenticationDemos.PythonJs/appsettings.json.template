@@ -27,5 +27,12 @@
     "StorageAccountName": "<storage-account-name>",
     "SqlServer": "<server>.database.windows.net",
     "SqlDatabase": "<database-name>"
+  },
+  "Foundry": {
+    "Endpoint": "https://<your-resource>.services.ai.azure.com/openai/v1/",
+    "ModelDeployment": "<your-model-deployment-name>",
+    "SystemPrompt": "You are a helpful assistant. Be concise and clear.",
+    "MaxTokens": 1000,
+    "Temperature": 0.7
   }
 }

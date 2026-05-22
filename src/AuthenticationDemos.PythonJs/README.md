@@ -18,6 +18,32 @@ The app authenticates **as itself** using a Client ID and Client Secret register
 - `create_service_principal_credential()` — wraps `ClientSecretCredential` from `azure-identity`
 - `run_service_principal()` (`/api/service-principal/run`) — acquires tokens for Storage and SQL and logs every claim in the token
 
+### Pattern 3 — Foundry Chat (Service Principal + Entra ID Token, No API Key)
+
+The service principal authenticates to **Azure AI Foundry** using the exact same `ClientSecretCredential` used in Pattern 1 — but instead of Storage or SQL, it targets the Azure Cognitive Services scope. No API key is passed anywhere. Access is controlled by Azure RBAC.
+
+**When to use this:** any time your application calls an AI model endpoint. Entra ID tokens are short-lived and auditable; model API keys are long-lived shared secrets that bypass all RBAC controls.
+
+**How it works:**
+1. `ClientSecretCredential` presents the app's client ID + secret to Entra.
+2. `get_bearer_token_provider()` wraps the credential and lazily fetches a token for the `https://ai.azure.com/.default` scope on each request (auto-renewing before expiry).
+3. The `openai.OpenAI` client attaches that bearer token to each API request.
+4. Foundry validates the token and checks that the service principal holds the required role (`Cognitive Services OpenAI User` or `Azure AI User`) on the resource.
+
+**Required RBAC role:** assign **`Azure AI Foundry User`** to the service principal on your Foundry project (or on the parent Azure AI Services account).
+
+> **Role clarification:**
+> - `Cognitive Services OpenAI User` — only applies to dedicated **Azure OpenAI Service** resources (`.openai.azure.com`). It does not work on the newer unified Azure AI Services accounts (`.services.ai.azure.com`).
+> - `Azure AI Foundry User` — the correct role for Azure AI Services accounts and Foundry projects. You can assign it at the **project scope** (not just the full account) to limit the service principal to only that project's deployments.
+
+**Where to look in the code:**
+- `get_foundry_client()` — creates an `OpenAI` client with `get_bearer_token_provider(ClientSecretCredential, "https://ai.azure.com/.default")`; the docstring explains the token flow
+- `chat_message()` (`POST /api/chat/message`) — builds the conversation history, calls `client.complete()`, returns the reply and usage metrics
+- `get_chat_history()` — stores per-session message history in server-side state so the model gets full context on every turn
+- `clear_chat_history()` (`DELETE /api/chat/history`) — resets context for a fresh conversation
+
+---
+
 ### Pattern 2 — Delegated Access (On Behalf Of the Signed-In User)
 
 The user signs in through Microsoft Entra ID and the app then acquires access tokens that carry **the user's identity** when calling downstream Azure services. Azure sees the actual user — their RBAC assignments and audit trail apply.
@@ -92,7 +118,30 @@ cp appsettings.json.template appsettings.json
 
 Fill in all values from your Entra app registration and Azure resource names.
 
-### 3. macOS Prerequisites (ODBC Driver for SQL)
+### 3. Foundry Chat Setup
+
+To use the chat demo:
+
+1. **Create an Azure AI Foundry project** in the [Azure portal](https://ai.azure.com) and deploy a model (e.g., `gpt-4o-mini`).
+
+2. **Get the inference endpoint** — in your Foundry project, go to **Models + endpoints** → select your deployed model → copy the "Target URI" (ends in `/models`).
+
+3. **Grant the service principal access** — on your Azure AI Foundry resource, assign the **`Cognitive Services OpenAI User`** (or `Azure AI User`) RBAC role to the app registration service principal. This is what allows the service principal to call the model using its Entra ID token.
+
+4. **Fill in `appsettings.json`:**
+   ```json
+   "Foundry": {
+     "Endpoint": "https://<your-project>.services.ai.azure.com/models",
+     "ModelDeployment": "gpt-4o-mini",
+     "SystemPrompt": "You are a helpful assistant. Be concise and clear."
+   }
+   ```
+
+> **Why no API key?** Model API keys are long-lived shared secrets — anyone who has one can call your model with no audit trail. Entra ID tokens are scoped (specific resource only), short-lived (default 1 hour), and leave a full audit log in Entra sign-in logs. The `openai` SDK accepts a token provider callable as `api_key` and automatically handles token acquisition and renewal.
+
+> **Scope change from legacy**: The correct scope for the OpenAI SDK `/openai/v1/` endpoint is `https://ai.azure.com/.default`. The older Azure AI Inference SDK used `https://cognitiveservices.azure.com/.default` — these are not interchangeable.
+
+### 4. macOS Prerequisites (ODBC Driver for SQL)
 
 ```bash
 brew install unixodbc
@@ -124,5 +173,6 @@ Open `http://localhost:5001` in your browser.
 | `msal` | OpenID Connect auth code flow + per-session token cache |
 | `azure-identity` | `ClientSecretCredential` for the service principal flow |
 | `azure-storage-blob` | Azure Blob Storage client |
+| `openai` | Azure AI Foundry chat completions via OpenAI v1 API (`/openai/v1/`) |
 | `pyodbc` | SQL Server via ODBC Driver 18 for SQL Server |
 | `PyJWT` | Decode JWT claims for display in the log panel |

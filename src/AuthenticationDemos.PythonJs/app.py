@@ -13,8 +13,9 @@ import jwt
 import msal
 import pyodbc
 from azure.core.credentials import AccessToken, TokenCredential
-from azure.identity import ClientSecretCredential
+from azure.identity import ClientSecretCredential, get_bearer_token_provider
 from azure.storage.blob import BlobServiceClient
+from openai import OpenAI
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
 # ---------------------------------------------------------------------------
@@ -31,6 +32,12 @@ from flask import Flask, jsonify, redirect, render_template, request, session, u
 #      MSAL token cache in the server session and uses it to silently
 #      acquire scoped access tokens on the user's behalf — without
 #      re-prompting the user on every request.
+#
+#   3. Foundry Chat (service principal + Azure AI Inference SDK)
+#      The service principal acquires an Entra ID token for the Azure AI
+#      Cognitive Services scope and passes it to the ChatCompletionsClient.
+#      No model API key is used — all access is governed by Entra ID RBAC.
+#      This pattern is production-safe and auditable.
 #
 # This manual MSAL implementation shows step-by-step what Azure App
 # Service Easy Auth automates when you enable it in the portal.
@@ -82,6 +89,7 @@ config = load_config()
 azure_ad = config["AzureAd"]
 azure_resources = config["AzureResources"]
 downstream_apis = config.get("DownstreamApis", {})
+foundry_config = config.get("Foundry", {})
 
 
 @app.context_processor
@@ -100,6 +108,7 @@ def get_session_state() -> dict[str, Any]:
             _state[sid] = {
                 "logs": {"service_principal": [], "obo": []},
                 "allowed_tables": {"service_principal": [], "obo": []},
+                "chat_history": [],
             }
         return _state[sid]
 
@@ -322,6 +331,132 @@ def acquire_delegated_token(target: str) -> str:
 def error_response(mode: str, message: str, status: int = 500, log_details: str | None = None) -> Any:
     append_log(mode, "error", log_details or message)
     return jsonify({"ok": False, "error": message}), status
+
+
+# ---------------------------------------------------------------------------
+# Demo 3 — Foundry Chat
+# ---------------------------------------------------------------------------
+
+def get_foundry_client() -> OpenAI:
+    """Create an OpenAI client authenticated as the service principal via Entra ID.
+
+    The openai SDK supports TokenCredential-based authentication through
+    get_bearer_token_provider(), which wraps the credential and lazily fetches
+    (and auto-renews) a bearer token for the given scope.
+
+    Scope used: 'https://ai.azure.com/.default'
+    This is the correct scope for the OpenAI SDK connecting to Foundry Models
+    via the /openai/v1/ endpoint. The service principal must hold the
+    'Cognitive Services OpenAI User' or 'Azure AI User' RBAC role on
+    the Foundry resource — no API key is needed or used.
+    """
+    credential = ClientSecretCredential(
+        tenant_id=azure_ad["TenantId"],
+        client_id=azure_ad["ClientId"],
+        client_secret=azure_ad["ClientSecret"],
+    )
+    token_provider = get_bearer_token_provider(credential, "https://ai.azure.com/.default")
+    return OpenAI(
+        base_url=foundry_config["Endpoint"],
+        api_key=token_provider,
+    )
+
+
+def get_chat_history() -> list[dict[str, str]]:
+    """Return the per-session chat message history.
+
+    Conversation history is stored in the server-side session state so the
+    model receives full context on every turn. Each entry is a dict with
+    'role' ('user' or 'assistant') and 'content' keys.
+    """
+    return get_session_state().setdefault("chat_history", [])
+
+
+@app.get("/chat")
+def chat_page() -> str:
+    return render_template(
+        "chat.html",
+        model_deployment=foundry_config.get("ModelDeployment", ""),
+        endpoint=foundry_config.get("Endpoint", ""),
+    )
+
+
+@app.post("/api/chat/message")
+def chat_message() -> Any:
+    """Send a user message to the Foundry model and return the reply with usage metrics.
+
+    Authentication flow:
+      1. ClientSecretCredential presents client_id + client_secret to Entra ID.
+      2. Entra issues an access token for 'https://ai.azure.com/.default'.
+      3. The OpenAI client attaches that bearer token to the HTTP request.
+      4. Azure AI Foundry validates the token and checks that the service
+         principal has the required RBAC role — no API key involved.
+
+    The full conversation history is sent on every request so the model
+    maintains context across turns (stateless HTTP, stateful conversation).
+    """
+    if not foundry_config.get("Endpoint") or not foundry_config.get("ModelDeployment"):
+        return jsonify({"ok": False, "error": "Foundry is not configured. Add a Foundry section to appsettings.json."}), 503
+
+    payload = request.get_json(silent=True) or {}
+    user_message = payload.get("message", "").strip()
+    if not user_message:
+        return jsonify({"ok": False, "error": "Message cannot be empty."}), 400
+
+    history = get_chat_history()
+
+    # Build the messages list: system prompt + full conversation history + new user turn.
+    # Sending history on every call is the standard pattern for stateless HTTP chat.
+    # The OpenAI SDK uses plain dicts with 'role' and 'content' keys.
+    system_prompt = foundry_config.get("SystemPrompt", "You are a helpful assistant. Be concise and clear.")
+    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+    messages.extend(history)  # history entries already have the correct {role, content} shape
+    messages.append({"role": "user", "content": user_message})
+
+    try:
+        client = get_foundry_client()
+        start_time = time.time()
+        response = client.chat.completions.create(
+            model=foundry_config["ModelDeployment"],
+            messages=messages,
+            max_completion_tokens=foundry_config.get("MaxTokens", 1000),
+            temperature=foundry_config.get("Temperature", 0.7),
+        )
+        latency_ms = int((time.time() - start_time) * 1000)
+    except Exception as ex:  # noqa: BLE001
+        return jsonify({"ok": False, "error": f"Foundry request failed: {ex}"}), 500
+
+    assistant_reply = response.choices[0].message.content
+    finish_reason = response.choices[0].finish_reason or "unknown"
+    usage = response.usage
+
+    # Persist both turns to the session history so the next request has full context.
+    history.append({"role": "user", "content": user_message})
+    history.append({"role": "assistant", "content": assistant_reply})
+
+    return jsonify({
+        "ok": True,
+        "message": assistant_reply,
+        "metrics": {
+            "prompt_tokens": usage.prompt_tokens,
+            "completion_tokens": usage.completion_tokens,
+            "total_tokens": usage.total_tokens,
+            "latency_ms": latency_ms,
+            "model": response.model,
+            "finish_reason": finish_reason,
+        },
+    })
+
+
+@app.delete("/api/chat/history")
+def clear_chat_history() -> Any:
+    """Clear the conversation history for the current session.
+
+    Because history is sent to the model on every request, clearing it
+    resets the model's context — the next message starts a fresh conversation.
+    """
+    get_session_state()["chat_history"] = []
+    return jsonify({"ok": True})
 
 
 @app.get("/")
