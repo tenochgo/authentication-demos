@@ -12,7 +12,8 @@
     "ClientId": "<client-id>",
     "ClientSecret": "<client-secret>",
     "CallbackPath": "/signin-oidc",
-    "SignedOutCallbackPath": "/signout-callback-oidc"
+    "SignedOutCallbackPath": "/signout-callback-oidc",
+    "RedirectBaseUrl": "http://localhost:5001"
   },
   "DownstreamApis": {
     "Storage": {

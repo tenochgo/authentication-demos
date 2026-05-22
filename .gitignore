@@ -85,3 +85,8 @@ Icon?
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+#Python
+__pycache__/
+.venv/
+src/AuthenticationDemos.PythonJs/.venv
